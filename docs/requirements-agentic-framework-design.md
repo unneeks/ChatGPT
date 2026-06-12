@@ -105,12 +105,100 @@ A pipeline of specialized agents under one orchestrator. Drafting and judging ar
 
 1. **Intake & Triage** — listens to Jira webhooks; validates against an intake schema (problem statement, business outcome, sponsor, impacted systems, data touched); classifies demand type; assigns preliminary risk tier (deterministic rules). Incomplete intake → structured questions posted as Jira comments, state `awaiting-input`.
 2. **Context Retrieval** — ACL-aware RAG over Confluence/SharePoint, policy/regulatory corpus, CMDB, enterprise glossary, and the existing Jira backlog (for duplicates/conflicts). Returns *cited* context bundles only.
-3. **Elicitation** — generates targeted clarifying questions per stakeholder role, posted into Jira (and optionally email/Teams); ingests answers and meeting transcripts; tracks open-question debt.
+3. **Elicitation** — generates targeted clarifying questions per stakeholder role and pursues answers through an **escalating channel ladder**: Jira comment → Teams chat → scheduled clarification meeting (see §3a). Ingests answers and meeting transcripts; tracks open-question debt.
 4. **Analyst / Synthesizer** — drafts epics, user stories, Given/When/Then acceptance criteria, NFRs (security, availability, performance, data retention), data requirements, and assumption/decision logs. Every statement carries inline provenance references.
 5. **Compliance & Risk** — maps requirements to regulatory obligations from the policy corpus, confirms/raises the risk tier, and flags items requiring second-line (risk/compliance) review.
 6. **Verification layer** — see §4.
 7. **Human review** — see §2.
 8. **Publish & Trace** — writes approved artifacts back to Jira (issues, links, custom fields), updates the requirements traceability matrix, emits audit events.
+
+---
+
+## 3a. Active Elicitation — Teams Outreach & Meeting Scheduling
+
+The Elicitation agent does not wait for stakeholders to come back to Jira. It initiates contact —
+Teams conversations and, when asynchronous channels fail, **scheduled clarification meetings**.
+This is the only place the framework contacts humans directly, so it carries the tightest controls
+in the design.
+
+### Channel escalation ladder
+
+```
+ Open question raised (with question_id, linked to Jira issue)
+   │
+   ▼
+ Step 1: Jira comment, @mention stakeholder ── answered? ──▶ ingest, close question
+   │ no response within SLA (e.g., 1 business day)
+   ▼
+ Step 2: Teams 1:1 / group chat via bot ─────── answered? ──▶ ingest, post answer
+   │ no response within SLA (e.g., 2 business days)        back to Jira, close
+   ▼
+ Step 3: Propose meeting — find availability of required
+         stakeholders, send calendar invite with agenda
+         (= the open question list), Jira link, and bot identity
+   │
+   ▼
+ Step 4: Meeting held → transcript captured → answers extracted,
+         cited to transcript spans → minutes + decisions posted to
+         Jira → remaining questions loop back to Step 1 or escalate
+         to the human owner (BA/PO)
+```
+
+Each rung is configurable per risk tier and stakeholder seniority (e.g., executives are never
+chased by chat; the agent goes straight from Jira to proposing a slot via their EA/delegate rules).
+
+### Conversation design (Teams)
+
+- The bot is **clearly identified as an agent** ("Requirements Assistant on behalf of <initiative>,
+  Jira <key>") — no impersonation of humans, ever. First-contact message explains why the
+  stakeholder was selected (provenance: named as sponsor/SME on the intake).
+- Questions are sent as **structured cards** (question, context, answer options + free text), not
+  open-ended chat — answers parse deterministically and ambiguous replies trigger one targeted
+  follow-up, not an unbounded dialogue. Conversation depth is capped (e.g., 3 turns per question);
+  beyond the cap, escalate the rung.
+- Stakeholders can always reply "talk to a human" → immediate handoff to the BA/PO with full context.
+- All outreach text passes the same Layer-1 gates (PII scan, tone/policy lint) before sending.
+
+### Meeting scheduling
+
+- Uses calendar free/busy (Graph API class capability) to find slots for the *minimum required*
+  attendee set — the agent computes who is actually needed per open question, not "invite everyone."
+- Invites carry: agenda generated from the open-question list, pre-read (current draft + sources),
+  expected outcome per agenda item, and the Jira link. A meeting without a question-derived agenda
+  cannot be sent (deterministic gate).
+- **A human owner (BA/PO) is always an invitee** and chairs the meeting; the agent attends as a
+  note-taker, not the facilitator of record. The agent never schedules a meeting with no human owner.
+- Transcript/recording follows bank policy (announced, consented, retained per records schedule).
+  Extracted answers are cited to transcript timestamps and become first-class provenance in the RTM.
+- Declines/no-shows are handled forward (rebook once, then escalate to human owner), never by
+  silently dropping the question.
+
+### Guardrails specific to outreach (autonomy budget)
+
+| Control | Rule |
+|---|---|
+| Rate limits | Per-stakeholder caps (e.g., ≤1 chat/day, ≤2 meeting requests/week per person, global daily send budget) — enforced in the gateway, not the prompt |
+| Approval tiers | Low/medium tier: chat outreach autonomous, meeting *proposals* autonomous but human owner is on the invite. High tier or external participants: human approves the outreach before send (maker–checker) |
+| Scope | Outreach only to stakeholders named on the intake or resolved from the CMDB/RACI for impacted systems; never cold-contact outside that set |
+| Idempotency | question_id is the idempotency key across channels — a retried run never re-pings or double-books |
+| Kill switch | Per-agent and global outreach pause; any stakeholder complaint auto-pauses outreach for that initiative pending human review |
+| Audit | Every message, card response, invite, decline, and transcript extraction is an event in the audit ledger, linked to question_id → requirement → RTM |
+
+### Additional components this adds to the solution architecture
+
+| Capability | Recommendation |
+|---|---|
+| Teams bot | Azure Bot Service / Teams app with adaptive cards; bot identity registered and verifiable; messages via Graph API |
+| Calendar & scheduling | Microsoft Graph (findMeetingTimes, calendar write) under a dedicated least-privilege service identity |
+| Transcript ingestion | Teams meeting transcript API → transcript store → answer-extraction pipeline (extractions carry timestamp citations) |
+| Outreach policy service | The rate limits, scope rules, and escalation SLAs above as policy-as-code (same OPA layer), evaluated on every send |
+| Notification ledger | Outreach events stream into the same Kafka → WORM audit ledger |
+
+### KPIs added
+
+- Question closure rate per channel rung (how often chat resolves it before a meeting is needed)
+- Median time-to-answer per rung; meetings avoided vs. baseline elicitation workshops
+- Stakeholder friction signals: opt-outs, "talk to a human" rate, complaint count (auto-pause trigger)
 
 ---
 
