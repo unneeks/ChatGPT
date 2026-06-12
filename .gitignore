@@ -7,4 +7,8 @@ node_modules/
 dist/
 .parcel-cache
 db.json
-.env
+.env.venv/
+__pycache__/
+*.pyc
+reqsmith/.env
+reqsmith/*.db
