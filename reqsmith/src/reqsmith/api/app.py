@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+import reqsmith.stages  # noqa: F401 — importing registers all stage handlers
 from reqsmith.api import admin, jobs, webhooks_jira
 from reqsmith.orchestrator.engine import worker_loop
 

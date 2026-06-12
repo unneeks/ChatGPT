@@ -24,12 +24,13 @@ async def test_webhook_returns_202_with_job(sample_webhook_payload):
         assert status.json()["run_state"] == "intake"
 
 
-async def test_webhook_replay_is_flagged_duplicate(sample_webhook_payload):
+async def test_webhook_replay_routes_to_active_run(sample_webhook_payload):
     async with _client() as client:
         first = (await client.post("/webhooks/jira", json=sample_webhook_payload)).json()
         second = (await client.post("/webhooks/jira", json=sample_webhook_payload)).json()
-        assert second["duplicate"] is True
+        # redelivered webhook never creates a second run — it routes to the active one
         assert second["run_id"] == first["run_id"]
+        assert second["status"] in ("ignored", "resumed")
 
 
 async def test_webhook_rejects_bad_secret(sample_webhook_payload, monkeypatch):

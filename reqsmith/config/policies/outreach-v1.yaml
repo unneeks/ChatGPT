@@ -1,0 +1,26 @@
+# Escalation ladder + autonomy budget (design §3a). Enforced in code, never in prompts.
+version: v1
+ladder:
+  - rung: 1
+    channel: jira_comment
+    sla_hours: 24
+  - rung: 2
+    channel: teams_card
+    sla_hours: 48
+  - rung: 3
+    channel: meeting_invite
+    sla_hours: 72
+rate_limits:
+  per_stakeholder_chats_per_day: 1
+  per_stakeholder_meetings_per_week: 2
+  global_daily_send_budget: 50
+conversation:
+  max_turns_per_question: 3
+approval_by_tier:
+  low: autonomous
+  medium: autonomous          # chat outreach autonomous; human owner always on meeting invites
+  high: maker_checker         # human approves outreach before send
+meeting:
+  rebook_attempts: 1
+  human_owner_always_invited: true
+  require_question_agenda: true

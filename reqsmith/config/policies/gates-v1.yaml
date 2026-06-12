@@ -1,0 +1,81 @@
+# Layer-1 deterministic gates (design §4). Executable governance: every rule here
+# compiles into a pipeline gate; failing a rule with severity "block" stops the stage.
+version: v1
+rules:
+  # --- intake completeness ---
+  - id: intake.summary.present
+    applies_to: intake
+    type: required_field
+    field: summary
+    severity: block
+    message: "Intake must have a summary"
+
+  - id: intake.description.min_length
+    applies_to: intake
+    type: min_length
+    field: description
+    min: 80
+    severity: block
+    message: "Problem statement too thin to analyse (need >= 80 chars describing problem, outcome, scope)"
+
+  - id: intake.reporter.present
+    applies_to: intake
+    type: required_field
+    field: reporter
+    severity: block
+    message: "Intake must have an identifiable sponsor/reporter"
+
+  # --- structural lint on drafts ---
+  - id: draft.no_placeholders
+    applies_to: draft
+    type: regex_absent
+    field: __all_text__
+    pattern: '\b(TBD|TODO|FIXME|\?\?\?)\b'
+    severity: block
+    message: "Draft contains unresolved placeholders"
+
+  - id: draft.stories.present
+    applies_to: draft
+    type: required_field
+    field: stories
+    severity: block
+    message: "Draft must contain at least one story"
+
+  - id: draft.acceptance_criteria.gwt
+    applies_to: draft
+    type: gwt_shape
+    field: stories
+    severity: block
+    message: "Every acceptance criterion must be Given/When/Then shaped"
+
+  - id: draft.citations.present
+    applies_to: draft
+    type: citation_presence
+    field: stories
+    severity: block
+    message: "Every story must cite at least one source document (no orphan requirements)"
+
+  # --- PII / sensitive data leakage (MVP regex pack; DLP service later) ---
+  - id: text.pii.account_number
+    applies_to: any
+    type: regex_absent
+    field: __all_text__
+    pattern: '\b\d{10,16}\b'
+    severity: block
+    message: "Possible account/card number in generated text"
+
+  - id: text.pii.ssn_like
+    applies_to: any
+    type: regex_absent
+    field: __all_text__
+    pattern: '\b\d{3}-\d{2}-\d{4}\b'
+    severity: block
+    message: "Possible SSN-like identifier in generated text"
+
+  - id: text.secrets
+    applies_to: any
+    type: regex_absent
+    field: __all_text__
+    pattern: '(?i)\b(api[_-]?key|password|secret)\s*[:=]\s*\S+'
+    severity: block
+    message: "Possible credential material in generated text"

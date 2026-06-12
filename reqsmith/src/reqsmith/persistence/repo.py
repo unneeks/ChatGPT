@@ -55,6 +55,20 @@ class RunRepo:
     async def get(self, run_id: str) -> Run | None:
         return await self.session.get(Run, run_id)
 
+    async def active_for_issue(self, jira_issue_key: str) -> Run | None:
+        """Most recent non-terminal run for an issue — webhook events route here."""
+        from reqsmith.orchestrator.state_machine import TERMINAL_STATES
+
+        run = await self.session.scalar(
+            select(Run)
+            .where(Run.jira_issue_key == jira_issue_key)
+            .order_by(Run.created_at.desc())
+            .limit(1)
+        )
+        if run is not None and run.state not in TERMINAL_STATES:
+            return run
+        return None
+
     async def transition(self, run: Run, target: RunState, *, actor: str = "system",
                          detail: dict | None = None) -> Run:
         """The only legal way to change run.state. Illegal transitions raise."""
@@ -80,14 +94,29 @@ class JobRepo:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def enqueue(self, run_id: str, stage: str, attempt: int = 1) -> tuple[Job, bool]:
-        job = Job(run_id=run_id, stage=stage, attempt=attempt, status=JobStatus.QUEUED)
-        # (run_id, stage, attempt) unique → re-enqueue collapses
-        existing = await self.session.scalar(
-            select(Job).where(Job.run_id == run_id, Job.stage == stage, Job.attempt == attempt)
+    async def enqueue(self, run_id: str, stage: str, attempt: int | None = None) -> tuple[Job, bool]:
+        """Idempotent enqueue: collapses onto an existing queued/running job for the
+        stage; if the latest job for the stage already finished, starts the next
+        attempt (re-draft loops re-run a stage legitimately)."""
+        latest = await self.session.scalar(
+            select(Job)
+            .where(Job.run_id == run_id, Job.stage == stage)
+            .order_by(Job.attempt.desc())
+            .limit(1)
         )
-        if existing is not None:
-            return existing, False
+        if attempt is None:
+            if latest is not None and latest.status in (
+                JobStatus.PENDING, JobStatus.QUEUED, JobStatus.RUNNING
+            ):
+                return latest, False
+            attempt = (latest.attempt + 1) if latest is not None else 1
+        elif latest is not None and latest.attempt >= attempt:
+            existing = await self.session.scalar(
+                select(Job).where(Job.run_id == run_id, Job.stage == stage, Job.attempt == attempt)
+            )
+            if existing is not None:
+                return existing, False
+        job = Job(run_id=run_id, stage=stage, attempt=attempt, status=JobStatus.QUEUED)
         job, created = await insert_or_get(self.session, job, Job, Job.id, job.id)
         return job, created
 

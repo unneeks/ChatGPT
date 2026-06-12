@@ -1,0 +1,17 @@
+# Deterministic risk tiering (design §2). The LLM NEVER sets the tier.
+# First matching rule wins, evaluated top-down over intake summary+description text.
+version: v1
+default_tier: medium
+rules:
+  - id: tier.high.regulatory
+    tier: high
+    keywords: [regulatory, regulation, compliance, KYC, AML, sanctions, GDPR, PCI, "model risk", audit]
+  - id: tier.high.payments
+    tier: high
+    keywords: [payment, payments, settlement, clearing, SWIFT, wire transfer, card processing]
+  - id: tier.high.customer_data
+    tier: high
+    keywords: [PII, "personal data", "customer data", biometric, credential]
+  - id: tier.low.internal_tooling
+    tier: low
+    keywords: ["internal tool", "internal dashboard", "copy change", "wording change", documentation]
