@@ -148,3 +148,36 @@ class JiraClient:
             resp = await client.post("/rest/api/3/issue", json={"fields": fields})
             resp.raise_for_status()
             return resp.json()["key"]
+
+    async def set_reqsmith_fields(
+        self,
+        key: str,
+        *,
+        risk_tier: str | None = None,
+        confidence: float | None = None,
+        provenance_url: str | None = None,
+        run_state: str | None = None,
+    ) -> None:
+        """Write reqsmith custom fields to a Jira issue.
+
+        Reads field IDs from settings (JIRA_FIELD_RISK_TIER etc.) — silently
+        skips any field whose ID is not configured so unconfigured deployments
+        don't error.
+        """
+        settings = get_settings()
+        fields: dict = {}
+        if risk_tier is not None and settings.jira_field_risk_tier:
+            fields[settings.jira_field_risk_tier] = {"value": risk_tier}
+        if confidence is not None and settings.jira_field_confidence:
+            fields[settings.jira_field_confidence] = confidence
+        if provenance_url is not None and settings.jira_field_provenance:
+            fields[settings.jira_field_provenance] = provenance_url
+        if run_state is not None and settings.jira_field_run_state:
+            fields[settings.jira_field_run_state] = run_state
+        if fields:
+            await self.set_fields(key, fields)
+
+    def comments_containing(self, key: str, marker: str) -> list[dict]:
+        raise NotImplementedError(
+            "comments_containing requires pre-fetched issue data; use get_issue() first"
+        )
