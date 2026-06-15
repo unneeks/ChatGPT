@@ -148,12 +148,22 @@ async def advance_question(question_id: str, session: AsyncSession) -> dict:
             user_aad_id=question.stakeholder_aad_id, card=card
         )
 
+    elif channel == "meeting_invite":
+        # Delegate entirely to the scheduler which handles agenda gate, rebook-once,
+        # attendee list, and Graph API call. It manages its own outreach_events rows.
+        from reqsmith.outreach.scheduler import schedule_meeting_for_question
+        result = await schedule_meeting_for_question(question_id, session)
+        if result["action"] in ("scheduled",):
+            # scheduler wrote the outreach_event; advance rung here
+            question.current_rung = next_rung
+            question.sla_deadline = datetime.now(UTC) + timedelta(hours=_sla_hours(next_rung))
+            await session.flush()
+        return result
+
     elif channel == "jira_comment":
         # Rung 1 is always jira_comment — sent by triage. Re-sending on later rungs
         # is unusual but handled here for completeness.
-        from reqsmith import deps as _deps
-        jira = _deps.get_jira()
-        # find run → issue key via question
+        jira = deps.get_jira()
         from reqsmith.persistence.models import Run
         run = await session.get(Run, question.run_id)
         if run:

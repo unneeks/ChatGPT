@@ -1,6 +1,7 @@
 """Adapter wiring. Real clients by default (when configured); tests and the eval
 harness inject fakes via the setters."""
 
+from reqsmith.adapters.graph.port import GraphPort
 from reqsmith.adapters.jira.port import JiraPort
 from reqsmith.adapters.llm.port import LLMPort
 from reqsmith.adapters.teams.port import TeamsPort
@@ -8,6 +9,7 @@ from reqsmith.adapters.teams.port import TeamsPort
 _jira: JiraPort | None = None
 _llm: LLMPort | None = None
 _teams: TeamsPort | None = None
+_graph: GraphPort | None = None
 
 
 def get_jira() -> JiraPort:
@@ -50,3 +52,17 @@ def get_teams() -> TeamsPort:
 def set_teams(adapter: TeamsPort | None) -> None:
     global _teams
     _teams = adapter
+
+
+def get_graph() -> GraphPort:
+    global _graph
+    if _graph is None:
+        from reqsmith.adapters.graph.client import GraphClient
+
+        _graph = GraphClient()
+    return _graph
+
+
+def set_graph(adapter: GraphPort | None) -> None:
+    global _graph
+    _graph = adapter
