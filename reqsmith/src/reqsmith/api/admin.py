@@ -28,12 +28,14 @@ async def healthz():
 
 @router.post("/internal/tick")
 async def tick():
-    """External cron ping: advances SLA timers / escalation checks (ladder hooks in M7)."""
+    """External cron ping: advances SLA timers and outreach escalation ladder."""
+    from reqsmith.outreach.ladder import process_sla_rungs
     now = datetime.now(UTC).isoformat()
     async with session_scope() as session:
         await FlagRepo(session).set(TICK_FLAG, now, enabled=True)
         await emit_event(session, actor="system", action="tick", detail={"at": now})
-    return {"status": "ok", "tick": now}
+        advanced = await process_sla_rungs(session)
+    return {"status": "ok", "tick": now, "advanced": advanced}
 
 
 @router.post("/outreach/pause")

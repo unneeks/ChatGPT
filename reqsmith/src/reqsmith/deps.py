@@ -3,9 +3,11 @@ harness inject fakes via the setters."""
 
 from reqsmith.adapters.jira.port import JiraPort
 from reqsmith.adapters.llm.port import LLMPort
+from reqsmith.adapters.teams.port import TeamsPort
 
 _jira: JiraPort | None = None
 _llm: LLMPort | None = None
+_teams: TeamsPort | None = None
 
 
 def get_jira() -> JiraPort:
@@ -34,3 +36,17 @@ def get_llm() -> LLMPort:
 def set_llm(adapter: LLMPort | None) -> None:
     global _llm
     _llm = adapter
+
+
+def get_teams() -> TeamsPort:
+    global _teams
+    if _teams is None:
+        from reqsmith.adapters.teams.bot import TeamsBot
+
+        _teams = TeamsBot()
+    return _teams
+
+
+def set_teams(adapter: TeamsPort | None) -> None:
+    global _teams
+    _teams = adapter
