@@ -1,0 +1,22 @@
+{
+  "id": "golden-002",
+  "description": "ISO 20022 real-time payment gateway — high risk (payment keyword)",
+  "input": {
+    "key": "EVAL-002",
+    "issue_type": "Epic",
+    "summary": "Implement ISO 20022 real-time payment messaging gateway",
+    "description": "The bank's current batch SWIFT file processing cannot support the industry migration to ISO 20022 real-time messaging. We need a new gateway that parses incoming pacs.008 and pacs.009 payment messages, performs enrichment and sanction screening, routes them to the correct settlement rail (SEPA, CHAPS, Faster Payments), and emits structured acknowledgement messages within the SLA windows mandated by each scheme. The gateway must be resilient (99.99% uptime), auditable, and support replay for any failed settlement within a 24-hour window. Integration points include the core banking ledger, sanctions screening engine, and the treasury liquidity system.",
+    "reporter": "alex.johnson@bank.com"
+  },
+  "expected": {
+    "risk_tier": "high",
+    "triggering_rule": "tier.high.regulatory",
+    "intake_gates": {
+      "intake.summary.present": "pass",
+      "intake.description.min_length": "pass",
+      "intake.reporter.present": "pass"
+    },
+    "questions_range": [3, 10],
+    "notes": "'sanctions' keyword in description matches tier.high.regulatory (first rule wins); payment keywords also present but checked second."
+  }
+}

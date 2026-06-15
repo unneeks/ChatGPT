@@ -1,0 +1,22 @@
+{
+  "id": "golden-001",
+  "description": "Retail onboarding digitization — medium risk (no high-risk keywords)",
+  "input": {
+    "key": "EVAL-001",
+    "issue_type": "Epic",
+    "summary": "Digitise the retail onboarding intake flow",
+    "description": "Branch staff currently capture applicant information on paper forms and re-key it into three separate legacy systems. This causes duplicated effort, keying errors, and onboarding times of 5–7 business days. We need a structured digital intake that captures the information once, validates it at the point of entry, and propagates it automatically to downstream operations and product teams. The target outcome is to cut onboarding handling time to under 24 hours and reduce data-entry errors by 90%.",
+    "reporter": "jane.smith@bank.com"
+  },
+  "expected": {
+    "risk_tier": "medium",
+    "triggering_rule": null,
+    "intake_gates": {
+      "intake.summary.present": "pass",
+      "intake.description.min_length": "pass",
+      "intake.reporter.present": "pass"
+    },
+    "questions_range": [2, 8],
+    "notes": "No regulatory or payment keywords → default medium tier. All intake gates pass."
+  }
+}

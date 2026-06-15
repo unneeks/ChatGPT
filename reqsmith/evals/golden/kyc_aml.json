@@ -1,0 +1,22 @@
+{
+  "id": "golden-003",
+  "description": "KYC/AML document refresh — high risk (regulatory + AML keywords)",
+  "input": {
+    "key": "EVAL-003",
+    "issue_type": "Epic",
+    "summary": "Automate periodic KYC document refresh and AML re-screening cycle",
+    "description": "Regulatory requirements mandate that the bank refreshes Know Your Customer documentation and re-runs AML screening for all active retail and SME customers on a risk-tiered schedule (12 months for high-risk, 36 months for standard). Currently this process is entirely manual: relationship managers receive spreadsheet extracts, contact customers, collect documents via post or branch, scan them, and upload to the DMS. The target is an automated orchestration that identifies customers due for refresh, sends digital document requests via the mobile app or secure email, performs automated completeness checks, triggers AML re-screening via the sanctions provider API, and escalates exceptions to a human reviewer queue. The solution must produce an auditable compliance trail meeting FCA record-keeping standards.",
+    "reporter": "compliance-team@bank.com"
+  },
+  "expected": {
+    "risk_tier": "high",
+    "triggering_rule": "tier.high.regulatory",
+    "intake_gates": {
+      "intake.summary.present": "pass",
+      "intake.description.min_length": "pass",
+      "intake.reporter.present": "pass"
+    },
+    "questions_range": [3, 10],
+    "notes": "'KYC' and 'AML' and 'compliance' keywords → high tier via tier.high.regulatory rule."
+  }
+}

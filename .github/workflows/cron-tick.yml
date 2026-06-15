@@ -1,0 +1,46 @@
+name: SLA tick — advance outreach ladder
+
+on:
+  schedule:
+    # Every 10 minutes during business hours UTC Mon-Fri; every 30 min off-hours.
+    # GitHub Actions scheduler has ~1 min jitter — fine for SLA purposes.
+    - cron: "*/10 8-18 * * 1-5"
+    - cron: "*/30 0-7,19-23 * * 1-5"
+    - cron: "*/30 * * * 0,6"
+  workflow_dispatch:  # manual trigger for testing
+
+jobs:
+  tick:
+    name: Ping /internal/tick
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping tick endpoint
+        env:
+          REQSMITH_BASE_URL: ${{ secrets.REQSMITH_BASE_URL }}
+          TICK_SECRET: ${{ secrets.TICK_SECRET }}
+        run: |
+          set -euo pipefail
+          # Retry up to 3 times with exponential back-off (Azure Container Apps can cold-start)
+          for attempt in 1 2 3; do
+            http_code=$(curl -s -o /tmp/tick_body.json -w "%{http_code}" \
+              -X POST "${REQSMITH_BASE_URL}/internal/tick" \
+              -H "X-Tick-Secret: ${TICK_SECRET}" \
+              --max-time 30)
+            if [ "$http_code" = "200" ]; then
+              echo "Tick succeeded (attempt ${attempt}): $(cat /tmp/tick_body.json)"
+              exit 0
+            fi
+            echo "Attempt ${attempt} failed (HTTP ${http_code}) — sleeping $((attempt * 5))s"
+            sleep $((attempt * 5))
+          done
+          echo "All tick attempts failed" >&2
+          cat /tmp/tick_body.json >&2
+          exit 1
+
+      - name: Run eval harness (weekly, Mondays)
+        if: github.event_name == 'schedule' && startsWith(github.event.schedule, '*/10') && toJSON(github.run_number) == '1'
+        env:
+          REQSMITH_BASE_URL: ${{ secrets.REQSMITH_BASE_URL }}
+        run: |
+          echo "Weekly eval skipped in this job — run separately via workflow_dispatch on run_eval workflow."

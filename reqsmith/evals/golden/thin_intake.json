@@ -1,0 +1,22 @@
+{
+  "id": "golden-004",
+  "description": "Thin intake (missing reporter, short description) — expected gate failures",
+  "input": {
+    "key": "EVAL-004",
+    "issue_type": "Epic",
+    "summary": "Fix the login page",
+    "description": "It's broken.",
+    "reporter": ""
+  },
+  "expected": {
+    "risk_tier": "medium",
+    "triggering_rule": null,
+    "intake_gates": {
+      "intake.summary.present": "pass",
+      "intake.description.min_length": "fail",
+      "intake.reporter.present": "fail"
+    },
+    "questions_range": [0, 0],
+    "notes": "Missing reporter and sub-80-char description → two blocking gate failures. Triage should reject to awaiting-input."
+  }
+}

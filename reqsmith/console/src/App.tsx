@@ -2,6 +2,7 @@ import { Routes, Route, NavLink } from "react-router-dom";
 import QueueView from "./views/QueueView";
 import WorkspaceView from "./views/WorkspaceView";
 import AuditView from "./views/AuditView";
+import OutreachView from "./views/OutreachView";
 
 export default function App() {
   return (
@@ -23,6 +24,14 @@ export default function App() {
               Queue
             </NavLink>
             <NavLink
+              to="/outreach"
+              className={({ isActive }) =>
+                isActive ? "text-brand-600 border-b-2 border-brand-500 pb-1" : "text-gray-600 hover:text-brand-600"
+              }
+            >
+              Outreach
+            </NavLink>
+            <NavLink
               to="/audit"
               className={({ isActive }) =>
                 isActive ? "text-brand-600 border-b-2 border-brand-500 pb-1" : "text-gray-600 hover:text-brand-600"
@@ -38,6 +47,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<QueueView />} />
           <Route path="/runs/:runId" element={<WorkspaceView />} />
+          <Route path="/outreach" element={<OutreachView />} />
           <Route path="/audit" element={<AuditView />} />
           <Route path="/audit/:runId" element={<AuditView />} />
         </Routes>

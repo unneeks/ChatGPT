@@ -505,3 +505,140 @@ async def post_decision(
             session, actor=ctx.identity, action="decision.checker_approved", run_id=run.id,
         )
         return {"status": "approved", "run_id": run.id, "job_id": job.id}
+
+
+# ---------------------------------------------------------------------------
+# Outreach Monitor (Console v2, M10)
+# ---------------------------------------------------------------------------
+
+@router.get("/outreach")
+async def outreach_monitor(_ctx: ReviewerContext = Depends(_get_reviewer)):
+    """Outreach Monitor: ladder state, budget consumption, kill switch, recent events.
+
+    Used by the Console v2 Outreach Monitor view. Auto-refreshed every 30s.
+    """
+    from datetime import UTC, datetime
+
+    from sqlalchemy import func
+
+    from reqsmith.outreach.budget import _today_start, _week_start  # reuse helpers
+    from reqsmith.persistence.models import OutreachEvent, Question
+    from reqsmith.persistence.repo import FlagRepo
+    from reqsmith.verification.gates import load_policy_pack
+
+    policy = load_policy_pack("outreach")
+    limits = policy.get("rate_limits", {})
+
+    async with session_scope() as session:
+        # --- kill switch ---
+        flag = await FlagRepo(session).get("outreach_paused")
+        kill_switch = {
+            "paused": bool(flag and flag.enabled),
+            "reason": (flag.value if flag and flag.enabled else None),
+        }
+
+        # --- all questions (open + recently closed) for ladder state ---
+        question_rows = list(await session.scalars(
+            select(Question).order_by(Question.updated_at.desc()).limit(200)
+        ))
+
+        # batch-load issue keys via Run joins
+        run_ids = {q.run_id for q in question_rows}
+        run_map: dict[str, str] = {}
+        if run_ids:
+            from reqsmith.persistence.models import Run
+            runs = list(await session.scalars(select(Run).where(Run.id.in_(list(run_ids)))))
+            run_map = {r.id: r.jira_issue_key for r in runs}
+
+        now = datetime.now(UTC)
+        questions = []
+        for q in question_rows:
+            sla = q.sla_deadline
+            if sla and sla.tzinfo is None:
+                sla = sla.replace(tzinfo=UTC)
+            questions.append({
+                "question_id": q.question_id,
+                "run_id": q.run_id,
+                "issue_key": run_map.get(q.run_id),
+                "status": q.status,
+                "current_rung": q.current_rung,
+                "sla_deadline": sla.isoformat() if sla else None,
+                "sla_overdue": bool(sla and now > sla),
+                "stakeholder_aad_id": q.stakeholder_aad_id,
+            })
+
+        # --- recent outreach events (last 100) ---
+        recent_events_rows = list(await session.scalars(
+            select(OutreachEvent)
+            .order_by(OutreachEvent.id.desc())
+            .limit(100)
+        ))
+        recent_events = [
+            {
+                "question_id": e.question_id,
+                "channel": e.channel,
+                "direction": e.direction,
+                "external_message_id": e.external_message_id,
+                "idempotency_key": e.idempotency_key,
+                "created_at": e.created_at.isoformat(),
+            }
+            for e in recent_events_rows
+        ]
+
+        # --- budget consumption ---
+        today_start = _today_start()
+        week_start = _week_start()
+
+        # unique stakeholders with recent activity
+        stakeholder_ids = list({
+            q.stakeholder_aad_id for q in question_rows if q.stakeholder_aad_id
+        })
+
+        stakeholder_budget = []
+        for aad_id in stakeholder_ids[:20]:  # cap for performance
+            chats_today = (await session.scalar(
+                select(func.count()).select_from(OutreachEvent)
+                .join(Question, OutreachEvent.question_id == Question.question_id)
+                .where(
+                    OutreachEvent.direction == "out",
+                    OutreachEvent.channel == "teams_card",
+                    OutreachEvent.created_at >= today_start,
+                    Question.stakeholder_aad_id == aad_id,
+                )
+            )) or 0
+            meetings_week = (await session.scalar(
+                select(func.count()).select_from(OutreachEvent)
+                .join(Question, OutreachEvent.question_id == Question.question_id)
+                .where(
+                    OutreachEvent.direction == "out",
+                    OutreachEvent.channel == "meeting_invite",
+                    OutreachEvent.created_at >= week_start,
+                    Question.stakeholder_aad_id == aad_id,
+                )
+            )) or 0
+            stakeholder_budget.append({
+                "aad_id": aad_id,
+                "chats_today": chats_today,
+                "chats_limit": limits.get("per_stakeholder_chats_per_day", 1),
+                "meetings_this_week": meetings_week,
+                "meetings_limit": limits.get("per_stakeholder_meetings_per_week", 2),
+            })
+
+        global_sent_today = (await session.scalar(
+            select(func.count()).select_from(OutreachEvent)
+            .where(
+                OutreachEvent.direction == "out",
+                OutreachEvent.created_at >= today_start,
+            )
+        )) or 0
+
+    return {
+        "kill_switch": kill_switch,
+        "questions": questions,
+        "recent_events": recent_events,
+        "budget": {
+            "stakeholders": stakeholder_budget,
+            "global_sent_today": global_sent_today,
+            "global_limit": limits.get("global_daily_send_budget", 50),
+        },
+    }

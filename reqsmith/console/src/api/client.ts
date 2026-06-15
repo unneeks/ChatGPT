@@ -155,6 +155,60 @@ export const api = {
   eventsUrl: (runId: string, sinceId = 0) =>
     `${BASE}/reviewer/runs/${runId}/events?since_id=${sinceId}${token() ? `&token=${token()}` : ""}`,
 
+  outreach: () => get<OutreachMonitorResponse>("/reviewer/outreach"),
+
+  pauseOutreach: (paused: boolean, reason = "manual") =>
+    post<{ outreach_paused: boolean; reason: string }>("/outreach/pause", undefined)
+      .then(() => fetch(`${BASE}/outreach/pause?paused=${paused}&reason=${encodeURIComponent(reason)}`, {
+        method: "POST", headers: headers(),
+      }).then(r => r.json())),
+
   setToken: (t: string) => sessionStorage.setItem("reviewer_token", t),
   getToken: () => sessionStorage.getItem("reviewer_token") ?? "",
 };
+
+// --- Outreach Monitor types ---
+
+export interface KillSwitch {
+  paused: boolean;
+  reason: string | null;
+}
+
+export interface OutreachQuestion {
+  question_id: string;
+  run_id: string;
+  issue_key: string | null;
+  status: string;
+  current_rung: number;
+  sla_deadline: string | null;
+  sla_overdue: boolean;
+  stakeholder_aad_id: string | null;
+}
+
+export interface OutreachEvent {
+  question_id: string;
+  channel: string;
+  direction: string;
+  external_message_id: string | null;
+  idempotency_key: string;
+  created_at: string;
+}
+
+export interface StakeholderBudget {
+  aad_id: string;
+  chats_today: number;
+  chats_limit: number;
+  meetings_this_week: number;
+  meetings_limit: number;
+}
+
+export interface OutreachMonitorResponse {
+  kill_switch: KillSwitch;
+  questions: OutreachQuestion[];
+  recent_events: OutreachEvent[];
+  budget: {
+    stakeholders: StakeholderBudget[];
+    global_sent_today: number;
+    global_limit: number;
+  };
+}
