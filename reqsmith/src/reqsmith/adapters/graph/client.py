@@ -135,3 +135,72 @@ class GraphClient:
             resp.raise_for_status()
             data = resp.json()
         return data["id"]
+
+    async def get_meeting_transcript(self, event_id: str, organizer: str) -> str | None:
+        """Fetch VTT transcript for a calendar event via Graph.
+
+        Requires OnlineMeetingTranscript.Read.All scope + tenant application access policy.
+        Returns None on 403 (policy blocked), 404 (no transcript), or any other soft failure.
+        """
+        try:
+            import httpx
+        except ImportError as exc:
+            raise RuntimeError("httpx not installed") from exc
+
+        token = self._get_token()
+        base = "https://graph.microsoft.com/v1.0"
+        headers = {"Authorization": f"Bearer {token}"}
+
+        async with httpx.AsyncClient() as client:
+            # Step 1: get calendar event to find the online meeting join URL
+            resp = await client.get(
+                f"{base}/users/{organizer}/events/{event_id}",
+                headers=headers, timeout=30,
+            )
+            if resp.status_code in (403, 404):
+                return None
+            resp.raise_for_status()
+            event_data = resp.json()
+
+            join_url = (event_data.get("onlineMeeting") or {}).get("joinUrl")
+            if not join_url:
+                return None
+
+            # Step 2: resolve join URL → onlineMeeting id
+            from urllib.parse import quote
+            resp = await client.get(
+                f"{base}/users/{organizer}/onlineMeetings"
+                f"?$filter=JoinWebUrl eq '{quote(join_url, safe='')}'",
+                headers=headers, timeout=30,
+            )
+            if resp.status_code in (403, 404):
+                return None
+            resp.raise_for_status()
+            meetings = resp.json().get("value", [])
+            if not meetings:
+                return None
+            meeting_id = meetings[0]["id"]
+
+            # Step 3: list transcripts — pick the most recent
+            resp = await client.get(
+                f"{base}/users/{organizer}/onlineMeetings/{meeting_id}/transcripts",
+                headers=headers, timeout=30,
+            )
+            if resp.status_code in (403, 404):
+                return None
+            resp.raise_for_status()
+            transcripts = resp.json().get("value", [])
+            if not transcripts:
+                return None
+            transcript_id = transcripts[-1]["id"]  # most recent
+
+            # Step 4: download VTT content
+            resp = await client.get(
+                f"{base}/users/{organizer}/onlineMeetings/{meeting_id}"
+                f"/transcripts/{transcript_id}/content?$format=text/vtt",
+                headers=headers, timeout=60,
+            )
+            if resp.status_code in (403, 404):
+                return None
+            resp.raise_for_status()
+            return resp.text
