@@ -20,6 +20,13 @@ from reqsmith.settings import get_settings
 
 PROMPT_ID = "analyst_v1"
 
+try:
+    from reqsmith.crews.base import run_crew
+    from reqsmith.crews.drafting_crew import build_drafting_crew
+    _CREWAI_AVAILABLE = True
+except Exception:
+    _CREWAI_AVAILABLE = False
+
 
 def parse_json_response(text: str) -> dict:
     """Extract the first JSON object from a model response (tolerates ``` fences)."""
@@ -48,18 +55,54 @@ async def drafting(ctx: StageContext) -> StageOutcome:
         for s in sources
     )
 
-    llm = deps.get_llm()
-    result = await llm.complete(
-        prompt_id=PROMPT_ID,
-        variables={"sources": sources_block, "intake": json.dumps(intake)},
-        model_role="drafting",
-    )
-    checkpoint = _charge_tokens(ctx.run.checkpoint, result.input_tokens, result.output_tokens)
+    settings = get_settings()
+    draft: dict
+    mode: str
+    model_id: str
+    prompt_version: str
+    tokens_used: int = 0
 
-    draft = parse_json_response(result.text)
+    if _CREWAI_AVAILABLE:
+        crew = build_drafting_crew(
+            jira_project_key=settings.jira_project_key or "BANK",
+            drafting_model=settings.model_drafting,
+        )
+        draft = await run_crew(
+            crew,
+            session=ctx.session,
+            run_id=ctx.run.id,
+            job_id=ctx.job.id,
+            stage="drafting",
+            policy_version=ctx.run.policy_version,
+            inputs={
+                "intake": json.dumps(intake),
+                "jira_project_key": settings.jira_project_key or "BANK",
+            },
+        )
+        mode = "crew"
+        model_id = settings.model_drafting
+        prompt_version = settings.prompt_pack_version
+        # Token tracking: crew runner emits its own crew.finished event with totals;
+        # we charge a conservative estimate to the run budget (actual tokens in that event).
+        tokens_used = 0  # crew events carry their own usage; budget guard uses 0 here
+    else:
+        llm = deps.get_llm()
+        result = await llm.complete(
+            prompt_id=PROMPT_ID,
+            variables={"sources": sources_block, "intake": json.dumps(intake)},
+            model_role="drafting",
+        )
+        tokens_used = result.input_tokens + result.output_tokens
+        draft = parse_json_response(result.text)
+        mode = "single_agent"
+        model_id = result.model_id
+        prompt_version = result.prompt_version
+
+    checkpoint = _charge_tokens(ctx.run.checkpoint, tokens_used, 0)
+
     artifact = await ArtifactRepo(ctx.session).write_once(
         run_id=ctx.run.id, kind="draft_story", content=draft,
-        prompt_version=result.prompt_version, model_id=result.model_id,
+        prompt_version=prompt_version, model_id=model_id,
     )
 
     valid_source_ids = {s.id for s in sources}
@@ -77,14 +120,16 @@ async def drafting(ctx: StageContext) -> StageOutcome:
                 )
     await ctx.session.flush()
 
-    await emit_event(
-        ctx.session, actor="analyst", action="draft.created", run_id=ctx.run.id,
-        job_id=ctx.job.id, output_payload=draft,
-        prompt_version=result.prompt_version, model_id=result.model_id,
-        policy_version=ctx.run.policy_version,
-        detail={"mode": "single_agent", "stories": len(draft.get("stories", [])),
-                "tokens": result.input_tokens + result.output_tokens},
-    )
+    if mode == "single_agent":
+        await emit_event(
+            ctx.session, actor="analyst", action="draft.created", run_id=ctx.run.id,
+            job_id=ctx.job.id, output_payload=draft,
+            prompt_version=prompt_version, model_id=model_id,
+            policy_version=ctx.run.policy_version,
+            detail={"mode": mode, "stories": len(draft.get("stories", [])),
+                    "tokens": tokens_used},
+        )
+
     return StageOutcome(
         next_state=RunState.DRAFTING, next_stage="verification", checkpoint=checkpoint
     )

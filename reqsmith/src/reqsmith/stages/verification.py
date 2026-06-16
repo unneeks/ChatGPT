@@ -17,6 +17,13 @@ from reqsmith.verification.scoring import JUDGE_PASS_THRESHOLD, score_draft
 JUDGE_PROMPT_ID = "judge_rubric_v1"
 REVIEW_MARKER = "[REQ-REVIEW]"
 
+try:
+    from reqsmith.crews.base import run_crew
+    from reqsmith.crews.judge_crew import build_judge_crew
+    _CREWAI_AVAILABLE = True
+except Exception:
+    _CREWAI_AVAILABLE = False
+
 
 @register_stage("verification")
 async def verification(ctx: StageContext) -> StageOutcome:
@@ -61,14 +68,34 @@ async def verification(ctx: StageContext) -> StageOutcome:
         policy_version=report.policy_version,
     )
 
-    llm = deps.get_llm()
     intake = ctx.run.checkpoint.get("intake", {})
-    judge_result = await llm.complete(
-        prompt_id=JUDGE_PROMPT_ID,
-        variables={"draft": json.dumps(draft), "intake": json.dumps(intake)},
-        model_role="judge",
-    )
-    judge = parse_json_response(judge_result.text)
+
+    if _CREWAI_AVAILABLE:
+        from reqsmith.settings import get_settings
+        settings = get_settings()
+        judge_crew = build_judge_crew(judge_model=settings.model_judge)
+        judge = await run_crew(
+            judge_crew,
+            session=ctx.session,
+            run_id=ctx.run.id,
+            job_id=ctx.job.id,
+            stage="judge",
+            policy_version=ctx.run.policy_version,
+            inputs={"draft": json.dumps(draft), "intake": json.dumps(intake)},
+        )
+        judge_model_id = settings.model_judge
+        judge_prompt_version = settings.prompt_pack_version
+    else:
+        llm = deps.get_llm()
+        judge_result = await llm.complete(
+            prompt_id=JUDGE_PROMPT_ID,
+            variables={"draft": json.dumps(draft), "intake": json.dumps(intake)},
+            model_role="judge",
+        )
+        judge = parse_json_response(judge_result.text)
+        judge_model_id = judge_result.model_id
+        judge_prompt_version = judge_result.prompt_version
+
     judge_overall = float(judge.get("overall", 0))
     await gate_repo.record(
         run_id=ctx.run.id, artifact_id=artifact.id, layer=2, rule_id="judge.rubric",
@@ -78,9 +105,10 @@ async def verification(ctx: StageContext) -> StageOutcome:
     )
     await emit_event(
         ctx.session, actor="judge", action="judge.scored", run_id=ctx.run.id, job_id=ctx.job.id,
-        output_payload=judge, prompt_version=judge_result.prompt_version,
-        model_id=judge_result.model_id, policy_version=ctx.run.policy_version,
-        detail={"overall": judge_overall, "blocking_issues": judge.get("blocking_issues", [])},
+        output_payload=judge, prompt_version=judge_prompt_version,
+        model_id=judge_model_id, policy_version=ctx.run.policy_version,
+        detail={"overall": judge_overall, "blocking_issues": judge.get("blocking_issues", []),
+                "mode": "crew" if _CREWAI_AVAILABLE else "single_agent"},
     )
 
     hard_blocked = bool(report.blocking_failures) or not grounding.passed
