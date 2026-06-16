@@ -12,6 +12,8 @@ def isolated_db(tmp_path, monkeypatch):
     """Fresh file-backed SQLite per test; production uses Postgres via the same code paths."""
     url = f"sqlite+aiosqlite:///{tmp_path}/test.db"
     monkeypatch.setenv("DATABASE_URL", url)
+    # Clear webhook secret so tests that don't set it get open access (no .env leakage)
+    monkeypatch.setenv("JIRA_WEBHOOK_SECRET", "")
     settings_module.get_settings.cache_clear()
     db_module.reset_db_state()
 
